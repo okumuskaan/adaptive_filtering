@@ -84,20 +84,27 @@ def momentum_lms(x, d, mu, K, beta):
 
 
 def rls(x, d, mu, eps, K):
-    f = np.zeros(K)
-    x_buffer = np.zeros(K)
-    
-    N = len(x)
-    e = np.zeros(N)
-    P = (1/eps)*np.identity(K)
-    
-    for i in range(N):
-        x_buffer = np.r_[x[i], x_buffer[:-1]]
-        e[i] = d[i] - np.dot(x_buffer, f)
-        R1 = P @ (x_buffer[:, None] * x_buffer[None, :]) @ P
-        R2 = mu + np.dot(np.dot(x_buffer, P), x_buffer.T)
-        P = 1 / mu * (P - R1 / R2)
-        f = f + np.dot(P, x_buffer.T) * e[i]
+    # initial guess for the filter
+    w = np.zeros(K)
+    R = 1/eps*np.identity(K)
+    X = np.zeros(K)
 
+    # number of iterations
+    L = len(d)
+    e = np.zeros(L)
+    
+    # run the adaptation
+    for n in range(L):
+        
+        X = np.concatenate(([x[n]], X[:K-1]))
+        
+        R1 = np.inner(np.inner(np.inner(R,X),X.T),R)
+        R2 = mu + np.dot(np.dot(X,R),X.T)
+        R = 1/mu * (R - R1/R2)
+        w = w + np.dot(R, X.T) * (d[n] - np.dot(X.T, w))
+            
+        # estimate output and error
+        e[n] = d[n] - np.dot(w.transpose(), X) 
+        
     return e
 

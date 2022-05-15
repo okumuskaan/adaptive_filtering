@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 
-def sb_lms(x, d, mu, K, normalized=False, a=0.0, type="standard", beta=None):
+def sb_lms(x, d, mu, K, normalized=False, a=0.0, type="standard", beta=None, tqdm_print=False):
     """
     Implement sequential block least mean square algorithm which is the assigned adaptive filter algorithm
     d[n] = s[n] + (h * x)[n],
@@ -25,7 +25,9 @@ def sb_lms(x, d, mu, K, normalized=False, a=0.0, type="standard", beta=None):
     N = len(x)
     e = np.zeros(N)
     
-    func_norm = (lambda x: np.sqrt(np.dot(x,x))) if normalized else lambda x: 1
+    func_norm = (lambda x: 0.001+np.dot(x,x)) if normalized else (lambda x: 1)
+    
+    func_tqdm = (lambda x: tqdm(x, desc="Progress")) if tqdm_print else (lambda x: x)
     
     if type=="standard":
         func_e = lambda x: x
@@ -44,7 +46,7 @@ def sb_lms(x, d, mu, K, normalized=False, a=0.0, type="standard", beta=None):
     else:
         raise ValueError("Type must be either standard, sign-error, sign-data or sign-sign.")
     
-    for i in tqdm(range(N), desc="Progress"):
+    for i in func_tqdm(range(N)):
         x_buffer = np.r_[x[i], x_buffer[:-1]]
         e[i] = d[i] - np.dot(x_buffer, f)
         f = f * (1 - mu * a) + mu * func_e(e[i]) * func_x(x_buffer) / func_norm(x_buffer)
@@ -80,40 +82,29 @@ def momentum_lms(x, d, mu, K, beta):
     
     return e
 
-"""
-def block_lms(x, d, mu, K, L):
-"""
-"""
-    Implement block least mean square algorithm
-    d[n] = s[n] + (h * x)[n],
-    d[n]: received signal
-    x[n]: input noise signal
-    s[n]: source signal (tried to be estimated)
+
+def rls(x, d, mu, eps, K):
+    # initial guess for the filter
+    w = np.zeros(K)
+    R = 1/eps*np.identity(K)
+    X = np.zeros(K)
+
+    # number of iterations
+    L = len(d)
+    e = np.zeros(L)
     
-    :param x: input noise signal, x[n]
-    :param d: measured signal, d[n]
-    :param mu: step size
-    :param K: adaptive filter order
-    :param L: block length
-    
-    :return: error signal e[n] (estimated s[n])
-"""
-"""
-    f = np.zeros(K)
-    x_buffer = np.zeros(K)
-    x_buffer2 = np.zeros(L)
-    x_buffblock = np.zeros(L)
-    
-    N = len(x)
-    e = np.zeros(N)
-    
-    for i in range(int(np.floor(N/L))):
-        for j in range(L):
-            x_buffer = np.r_[x[i*L:j], x_buffer[:-1]]
-            x_buffer2 = np.r_[x[i*L:j], x_buffer2[:-1]]
-            x_buffblock(j) = np.dot(x_buffer2, f)
-        e[i*L:i*(L+1)] = d[i*L:i*(L+1)] - x_buffblock
-        f = f + mu * e[i] * x_buffer
-    
+    # run the adaptation
+    for n in range(L):
+        
+        X = np.concatenate(([x[n]], X[:K-1]))
+        
+        R1 = np.inner(np.inner(np.inner(R,X),X.T),R)
+        R2 = mu + np.dot(np.dot(X,R),X.T)
+        R = 1/mu * (R - R1/R2)
+        w = w + np.dot(R, X.T) * (d[n] - np.dot(X.T, w))
+            
+        # estimate output and error
+        e[n] = d[n] - np.dot(w.transpose(), X) 
+        
     return e
-"""
+
