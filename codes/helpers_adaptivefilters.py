@@ -108,3 +108,29 @@ def rls(x, d, mu = .999 , eps = .00001, K=5):
         
     return e
 
+def fast_block_lms(x, d, mu, K):
+    f = np.zeros(2*K) + 0j
+    f = np.random.randn(2*K) + 0j
+    x_buffer = np.zeros(2*K) + 0j
+    
+    N = len(x)
+    e = np.zeros(N) + 0j
+    e_buffer = np.zeros(2*K) + 0j
+    zeros_vec = np.zeros(K) + 0j
+    
+    for i in range(int(N/K)):
+        
+        x_buffer = np.r_[x_buffer[:K], x[i*K:(i+1)*K]] # 1
+        X = np.fft.fft(x_buffer) # 2
+        y = np.fft.ifft(f * X) # 3 & 4
+        e[i*K:(i+1)*K] = d[i*K:(i+1)*K] - y[K:] # 5 & 6
+        
+        e_buffer[K:] = e[i*K:(i+1)*K] # 7
+        E = np.fft.fft(e_buffer) # 7 & 8
+        
+        y = np.fft.ifft(E*np.conj(X)) # 9 & 10
+        y[K:] = zeros_vec # 11
+        f = f + mu * np.fft.fft(y) # 12 & 13
+
+    return np.real(e)
+

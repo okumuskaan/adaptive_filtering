@@ -1,14 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
-from helpers_adaptivefilters import sb_lms, rls
+from helpers_adaptivefilters import sb_lms, rls, fast_block_lms
 from tqdm import tqdm
 import time
 
 def generate_signals(f, T, fs, A=1, sigma_x=1, h=None, h_len=5, sigma_h=1, plot=True, break_noise = False):
     t = np.arange(0,T,1/fs)
     N = len(t)
-    
     s = A*np.sin(2*np.pi*f*t)+0.8*np.sin(2*np.pi*1.8*f*t)
     x = sigma_x * np.random.randn(N)
     added_x = np.zeros(N)
@@ -19,10 +18,10 @@ def generate_signals(f, T, fs, A=1, sigma_x=1, h=None, h_len=5, sigma_h=1, plot=
         sigma_h = np.std(h)
         
     if break_noise:
-        added_x = np.concatenate((np.zeros(int(N/2)),sigma_x*5 * np.random.randn(int(N/2))))
+        added_x = np.concatenate((np.zeros(int(N/2)),sigma_x*10 * np.random.randn(int(N/2))))
         
-    x = x + added_x 
-    noise = np.convolve(h, (x+added_x))
+    x = x + added_x
+    noise = np.convolve(h, x)
     d = s + noise[:N]
     
     if plot:
@@ -49,7 +48,7 @@ def find_misadjustment(aee, conv_point, fs, margin=100, print_misad=True, find_m
     else:
         misadjustment = np.mean(temp)
     if print_misad:
-        if not find_mean:
+        if find_mean:
             print("Max Misadjustment: \t", misadjustment)
         else:
             print("Mean Misadjustment: \t", misadjustment)
@@ -101,9 +100,6 @@ def denoising_plots(t, e, s, fs, T, margin=100, conv_div=40, bufsize=100, type=N
         axes[0].axvline(x=conv_point, linestyle='--', color="r")
         axes[0].text(conv_point, -.07, 'Convergence\nPoint: ' + f"{conv_point:.3f}", color='red', transform=axes[0].get_xaxis_transform(), ha='center', va='top', fontweight='bold', fontsize='large')
     
-        axes[1].axvline(x=conv_point, linestyle='--', color="r")
-        axes[1].text(conv_point, -.07, 'Convergence\nPoint: '+ f"{conv_point:.3f}", color='red', transform=axes[1].get_xaxis_transform(), ha='center', va='top', fontweight='bold', fontsize='large')
-        axes[1].hlines(y=0, xmin=conv_point, xmax=T, linestyle="--", color="red")
         axes[1].hlines(y=misadjustment, xmin=conv_point, xmax=T, linestyle="--", color="red")
         myArrow = FancyArrowPatch(posA=(max_t, 0), posB=(max_t, misadjustment), arrowstyle='<|-|>', color='red', mutation_scale=20, shrinkA=0, shrinkB=0)
         axes[1].add_artist(myArrow)
@@ -120,7 +116,7 @@ def denoising_plots(t, e, s, fs, T, margin=100, conv_div=40, bufsize=100, type=N
     if save:
         fig.savefig(savedfname+".png")
     
-def denoising_plots_across_params(t, s, x, d, fs, T, normalized=False, a=0.0, rls_bool = False, defaultK =5, rls_mu = None, rls_eps = None,lms_type="standard", Ks=None, mus=None, margin=100, conv_div=40, bufsize=100, beta=None, save=False, savedfname="Example"):
+def denoising_plots_across_params(t, s, x, d, fs, T, normalized=False, a=0.0, rls_bool = False, bls_bool = False,defaultK = 5, rls_mu = None, rls_eps = None,lms_type="standard", Ks=None, mus=None, margin=100, conv_div=40, bufsize=100, beta=None, save=False, savedfname="Example"):
     params = None
     param_name = " "
     if Ks is not None:
@@ -146,27 +142,32 @@ def denoising_plots_across_params(t, s, x, d, fs, T, normalized=False, a=0.0, rl
     fig, axes = plt.subplots(2, nparams, figsize=(19,12))
     fig.tight_layout(h_pad=10.0)
     plt.subplots_adjust(bottom=0.4, hspace=0.5)
-    
     for ind, param in enumerate(params):
         if param_name=="K":
-            mu=0.001
+            mu=0.0001
             K=param
+            eps = 0.00001
+            mu_rls = 0.999
         elif param_name=="mu":
             mu=param
             K=defaultK
+            eps = 0.00001
         elif param_name=="rls_mu":
-            mu=param
+            mu_rls=param
             K=defaultK
             eps=0.00001
         else:
-            mu=0.95
+            mu_rls=0.999
             K=defaultK
             eps = param
             
         if rls_bool:
-            e = rls(x, d,mu=mu, eps=eps, K=K)
+            e = rls(x, d,mu=mu_rls, eps=eps, K=K)
+        elif bls_bool:
+            e = fast_block_lms(x, d, mu=mu, K=K)
         else:
             e = sb_lms(x, d, mu=mu, K=K, normalized=normalized, a=a, type=lms_type, beta=beta)
+
         
         aee = np.square(s-e) # absolute estimation error
         max_e = max(e)
@@ -191,9 +192,7 @@ def denoising_plots_across_params(t, s, x, d, fs, T, normalized=False, a=0.0, rl
             axes[0, ind].axvline(x=conv_point, linestyle='--', color="r")
             axes[0, ind].text(conv_point, -.1, 'Convergence\nPoint: ' + f"{conv_point:.3f}", color='red', transform=axes[0, ind].get_xaxis_transform(), ha='center', va='top', fontweight='bold', fontsize='large')
 
-            axes[1, ind].axvline(x=conv_point, linestyle='--', color="r")
-            axes[1, ind].text(conv_point, -.1, 'Convergence\nPoint: ' + f"{conv_point:.3f}", color='red', transform=axes[1, ind].get_xaxis_transform(), ha='center', va='top', fontweight='bold', fontsize='large')
-            axes[1, ind].hlines(y=0, xmin=conv_point, xmax=T, linestyle="--", color="red")
+            
             axes[1, ind].hlines(y=max_misadjustment, xmin=conv_point, xmax=T, linestyle="--", color="red")
             myArrow = FancyArrowPatch(posA=(max_t, 0), posB=(max_t, max_misadjustment), arrowstyle='<|-|>', color='red', mutation_scale=20, shrinkA=0, shrinkB=0)
             axes[1, ind].add_artist(myArrow)
@@ -206,6 +205,7 @@ def denoising_plots_across_params(t, s, x, d, fs, T, normalized=False, a=0.0, rl
     
     if save:
         fig.savefig(savedfname+".png")
+        
     
     
     
